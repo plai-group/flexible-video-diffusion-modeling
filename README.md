@@ -1,4 +1,8 @@
-This is a fork of the codebase for [Improved Denoising Diffusion Probabilistic Models](https://arxiv.org/abs/2102.09672). I am modifying it to be compatible with my workflow (mainly by integration with wandb). This README contains the commands I have used for testing. More comprehensive instructions are available at [the original repo](https://github.com/openai/improved-diffusion).
+# Official repository for [Flexible Diffusion Modeling of Long Videos](https://arxiv.org/abs/2205.11495)
+
+![caption](https://www.cs.ubc.ca/~wsgh/fdm/video_arrays/carla_no_traffic_hierarchy-2_5_1.mp4)
+
+This codebase is based off that of [Improved Denoising Diffusion Probabilistic Models](https://arxiv.org/abs/2102.09672).
 
 # Usage
 
