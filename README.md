@@ -1,8 +1,8 @@
 # Official repository for [Flexible Diffusion Modeling of Long Videos](https://arxiv.org/abs/2205.11495)
 
-![caption](https://www.cs.ubc.ca/~wsgh/fdm/video_arrays/carla_no_traffic_hierarchy-2_5_1.mp4)
+![A 30 second clip from a video sampled on CARLA Town01.](https://www.cs.ubc.ca/~wsgh/fdm/video_arrays/carla-part-of-long-sample.gif)
 
-This codebase is based off that of [Improved Denoising Diffusion Probabilistic Models](https://arxiv.org/abs/2102.09672).
+This codebase is based off that of [Improved Denoising Diffusion Probabilistic Models](https://arxiv.org/abs/2102.09672) with the modifications to create a video model as described in [Flexible Diffusion Modeling of Long Videos](https://arxiv.org/abs/2205.11495).
 
 # Usage
 
