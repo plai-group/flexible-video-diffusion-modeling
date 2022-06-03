@@ -230,7 +230,7 @@ class GaussianDiffusion:
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
     def p_mean_variance(
-        self, model, x, t, clip_denoised=True, denoised_fn=None, model_kwargs=None
+        self, model, x, t, clip_denoised=True, denoised_fn=None, model_kwargs=None, return_attn_weights=False,
     ):
         """
         Apply the model to get p(x_{t-1} | x_t), as well as a prediction of
@@ -257,7 +257,7 @@ class GaussianDiffusion:
 
         B, C = x.shape[:2]
         assert t.shape == (B,)
-        model_output = model(x, self._scale_timesteps(t), **model_kwargs)
+        model_output, attn_weights = model(x, self._scale_timesteps(t), return_attn_weights=return_attn_weights, **model_kwargs)
 
         if self.model_var_type in [ModelVarType.LEARNED, ModelVarType.LEARNED_RANGE]:
             assert model_output.shape == (B, C * 2, *x.shape[2:])
@@ -323,6 +323,7 @@ class GaussianDiffusion:
             "variance": model_variance,
             "log_variance": model_log_variance,
             "pred_xstart": pred_xstart,
+            "attn": attn_weights,
         }
 
     def _predict_xstart_from_eps(self, x_t, t, eps):
@@ -354,7 +355,7 @@ class GaussianDiffusion:
         return t
 
     def p_sample(
-        self, model, x, t, clip_denoised=True, denoised_fn=None, model_kwargs=None
+        self, model, x, t, clip_denoised=True, denoised_fn=None, model_kwargs=None, return_attn_weights=False
     ):
         """
         Sample x_{t-1} from the model at the given timestep.
@@ -378,13 +379,14 @@ class GaussianDiffusion:
             clip_denoised=clip_denoised,
             denoised_fn=denoised_fn,
             model_kwargs=model_kwargs,
+            return_attn_weights=return_attn_weights,
         )
         noise = th.randn_like(x)
         nonzero_mask = (
             (t != 0).float().view(-1, *([1] * (len(x.shape) - 1)))
         )  # no noise when t == 0
         sample = out["mean"] + nonzero_mask * th.exp(0.5 * out["log_variance"]) * noise
-        return {"sample": sample, "pred_xstart": out["pred_xstart"]}
+        return {"sample": sample, "pred_xstart": out["pred_xstart"], "attn": out["attn"]}
 
     def p_sample_loop(
         self,
@@ -396,6 +398,8 @@ class GaussianDiffusion:
         model_kwargs=None,
         device=None,
         progress=False,
+        latent_mask=None,
+        return_attn_weights=False,
     ):
         """
         Generate samples from the model.
@@ -415,7 +419,8 @@ class GaussianDiffusion:
         :return: a non-differentiable batch of samples.
         """
         final = None
-        for sample in self.p_sample_loop_progressive(
+        attns = {}
+        for neg_t, sample in enumerate(self.p_sample_loop_progressive(
             model,
             shape,
             noise=noise,
@@ -424,9 +429,33 @@ class GaussianDiffusion:
             model_kwargs=model_kwargs,
             device=device,
             progress=progress,
-        ):
+            latent_mask=latent_mask,
+            return_attn_weights=return_attn_weights,
+        )):
+            if return_attn_weights:  # average attn_weights over quartiles of diffusion process
+                t = self.num_timesteps - neg_t - 1
+                quartile = (4*t)//self.num_timesteps
+                for key, attn_t in sample["attn"].items():
+                    if len(attn_t) == 0:
+                        continue
+                    tag = f"attn/q{quartile}-{key}"
+                    if tag not in attns:
+                        attns[tag] = 0
+                    largest_attn_shape = attn_t[0][0].shape  # due to U-net structure
+                    for attn_layer in attn_t:
+                        B = shape[0]
+                        attn_layer = attn_layer.view(B, attn_layer.shape[0]//B, *attn_layer.shape[1:]).mean(dim=1)
+                        if 'temporal' in key:
+                            reshaped = attn_layer
+                        else:
+                            reshaped = th.nn.functional.interpolate(
+                                attn_layer.unsqueeze(0), size=largest_attn_shape,
+                                mode='nearest',
+                            ).squeeze(0)
+                            reshaped = reshaped / reshaped.mean() * attn_layer.mean()  # renormalise
+                        attns[tag] = attns[tag] + reshaped/(self.num_timesteps/4)
             final = sample
-        return final["sample"]
+        return final["sample"], attns
 
     def p_sample_loop_progressive(
         self,
@@ -438,6 +467,8 @@ class GaussianDiffusion:
         model_kwargs=None,
         device=None,
         progress=False,
+        latent_mask=None,
+        return_attn_weights=False,
     ):
         """
         Generate samples from the model and yield intermediate samples from
@@ -472,11 +503,12 @@ class GaussianDiffusion:
                     clip_denoised=clip_denoised,
                     denoised_fn=denoised_fn,
                     model_kwargs=model_kwargs,
+                    return_attn_weights=return_attn_weights,
                 )
                 yield out
                 img = out["sample"]
 
-    def ddim_sample(
+    def ddim_sample(  # NOTE latent_mask etc. is not implemented for DDIM
         self,
         model,
         x,
@@ -640,7 +672,7 @@ class GaussianDiffusion:
                 img = out["sample"]
 
     def _vb_terms_bpd(
-        self, model, x_start, x_t, t, clip_denoised=True, model_kwargs=None
+        self, model, x_start, x_t, t, clip_denoised=True, model_kwargs=None, latent_mask=None,
     ):
         """
         Get a term for the variational lower-bound.
@@ -661,20 +693,20 @@ class GaussianDiffusion:
         kl = normal_kl(
             true_mean, true_log_variance_clipped, out["mean"], out["log_variance"]
         )
-        kl = mean_flat(kl) / np.log(2.0)
+        kl = mean_flat(kl, mask=latent_mask) / np.log(2.0)
 
         decoder_nll = -discretized_gaussian_log_likelihood(
             x_start, means=out["mean"], log_scales=0.5 * out["log_variance"]
         )
         assert decoder_nll.shape == x_start.shape
-        decoder_nll = mean_flat(decoder_nll) / np.log(2.0)
+        decoder_nll = mean_flat(decoder_nll, mask=latent_mask) / np.log(2.0)
 
         # At the first timestep return the decoder NLL,
         # otherwise return KL(q(x_{t-1}|x_t,x_0) || p(x_{t-1}|x_t))
         output = th.where((t == 0), decoder_nll, kl)
         return {"output": output, "pred_xstart": out["pred_xstart"]}
 
-    def training_losses(self, model, x_start, t, model_kwargs=None, noise=None):
+    def training_losses(self, model, x_start, t, model_kwargs=None, noise=None, latent_mask=None, eval_mask=None):
         """
         Compute training losses for a single timestep.
 
@@ -707,7 +739,7 @@ class GaussianDiffusion:
             if self.loss_type == LossType.RESCALED_KL:
                 terms["loss"] *= self.num_timesteps
         elif self.loss_type == LossType.MSE or self.loss_type == LossType.RESCALED_MSE:
-            model_output = model(x_t, self._scale_timesteps(t), **model_kwargs)
+            model_output, _ = model(x_t, timesteps=self._scale_timesteps(t), **model_kwargs)
 
             if self.model_var_type in [
                 ModelVarType.LEARNED,
@@ -739,7 +771,8 @@ class GaussianDiffusion:
                 ModelMeanType.EPSILON: noise,
             }[self.model_mean_type]
             assert model_output.shape == target.shape == x_start.shape
-            terms["mse"] = mean_flat((target - model_output) ** 2)
+            terms["mse"] = mean_flat((target - model_output) ** 2, mask=latent_mask)
+            terms["eval-mse"] = mean_flat((target - model_output) ** 2, mask=eval_mask)
             if "vb" in terms:
                 terms["loss"] = terms["mse"] + terms["vb"]
             else:
@@ -749,7 +782,7 @@ class GaussianDiffusion:
 
         return terms
 
-    def _prior_bpd(self, x_start):
+    def _prior_bpd(self, x_start, latent_mask=None):
         """
         Get the prior KL term for the variational lower-bound, measured in
         bits-per-dim.
@@ -765,19 +798,18 @@ class GaussianDiffusion:
         kl_prior = normal_kl(
             mean1=qt_mean, logvar1=qt_log_variance, mean2=0.0, logvar2=0.0
         )
-        return mean_flat(kl_prior) / np.log(2.0)
+        return mean_flat(kl_prior, mask=latent_mask) / np.log(2.0)
 
-    def calc_bpd_loop(self, model, x_start, clip_denoised=True, model_kwargs=None):
+
+    def calc_bpd_loop_subsampled(self, model, x_start, clip_denoised=True, model_kwargs=None, latent_mask=None, t_seq=None):
         """
         Compute the entire variational lower-bound, measured in bits-per-dim,
         as well as other related quantities.
-
         :param model: the model to evaluate loss on.
         :param x_start: the [N x C x ...] tensor of inputs.
         :param clip_denoised: if True, clip denoised samples.
         :param model_kwargs: if not None, a dict of extra keyword arguments to
             pass to the model. This can be used for conditioning.
-
         :return: a dict containing the following keys:
                  - total_bpd: the total variational lower-bound, per batch element.
                  - prior_bpd: the prior term in the lower-bound.
@@ -787,12 +819,23 @@ class GaussianDiffusion:
         """
         device = x_start.device
         batch_size = x_start.shape[0]
+        if t_seq is None:
+            t_seq = list(range(self.num_timesteps))[::-1]
 
         vb = []
         xstart_mse = []
         mse = []
-        for t in list(range(self.num_timesteps))[::-1]:
-            t_batch = th.tensor([t] * batch_size, device=device)
+        # A hacky way to handle computing bpd with a random subset of the timesteps,
+        # where each row of t_seq is timesteps to one batch item.
+        is_2d_t_seq = False
+        if isinstance(t_seq, np.ndarray) and t_seq.ndim == 2:
+            is_2d_t_seq = True
+            t_seq = t_seq.transpose()
+        for t in t_seq:
+            if is_2d_t_seq:
+                t_batch = th.tensor(t, device=device)
+            else:
+                t_batch = th.tensor([t] * batch_size, device=device)
             noise = th.randn_like(x_start)
             x_t = self.q_sample(x_start=x_start, t=t_batch, noise=noise)
             # Calculate VLB term at the current timestep
@@ -804,17 +847,18 @@ class GaussianDiffusion:
                     t=t_batch,
                     clip_denoised=clip_denoised,
                     model_kwargs=model_kwargs,
+                    latent_mask=latent_mask,
                 )
             vb.append(out["output"])
-            xstart_mse.append(mean_flat((out["pred_xstart"] - x_start) ** 2))
+            xstart_mse.append(mean_flat((out["pred_xstart"] - x_start) ** 2, mask=latent_mask))
             eps = self._predict_eps_from_xstart(x_t, t_batch, out["pred_xstart"])
-            mse.append(mean_flat((eps - noise) ** 2))
+            mse.append(mean_flat((eps - noise) ** 2, mask=latent_mask))
 
         vb = th.stack(vb, dim=1)
         xstart_mse = th.stack(xstart_mse, dim=1)
         mse = th.stack(mse, dim=1)
 
-        prior_bpd = self._prior_bpd(x_start)
+        prior_bpd = self._prior_bpd(x_start, latent_mask=latent_mask)
         total_bpd = vb.sum(dim=1) + prior_bpd
         return {
             "total_bpd": total_bpd,
@@ -823,6 +867,12 @@ class GaussianDiffusion:
             "xstart_mse": xstart_mse,
             "mse": mse,
         }
+
+    def calc_bpd_loop(self, model, x_start, clip_denoised=True, model_kwargs=None, latent_mask=None):
+        return self.calc_bpd_loop_subsampled(
+            model=model, x_start=x_start, clip_denoised=clip_denoised,
+            model_kwargs=model_kwargs, latent_mask=latent_mask,
+            t_seq=list(range(self.num_timesteps))[::-1])
 
 
 def _extract_into_tensor(arr, timesteps, broadcast_shape):

@@ -18,6 +18,7 @@ from .nn import (
     timestep_embedding,
     checkpoint,
 )
+from .rpe import RPEAttention
 
 
 class TimestepBlock(nn.Module):
@@ -32,18 +33,27 @@ class TimestepBlock(nn.Module):
         """
 
 
-class TimestepEmbedSequential(nn.Sequential, TimestepBlock):
+class TimestepEmbedAttnThingsSequential(nn.Sequential, TimestepBlock):
     """
-    A sequential module that passes timestep embeddings to the children that
+    A sequential module that passes extra things to the children that
     support it as an extra input.
     """
-
-    def forward(self, x, emb):
+    def forward(self, x, emb, attn_mask, T=1, frame_indices=None, attn_weights_list=None):
         for layer in self:
             if isinstance(layer, TimestepBlock):
-                x = layer(x, emb)
+                kwargs = dict(emb=emb)
+                kwargs['emb'] = emb
+            elif isinstance(layer, FactorizedAttentionBlock):
+                kwargs = dict(
+                    temb=emb,
+                    attn_mask=attn_mask,
+                    T=T,
+                    frame_indices=frame_indices,
+                    attn_weights_list=attn_weights_list,
+                )
             else:
-                x = layer(x)
+                kwargs = {}
+            x = layer(x, **kwargs)
         return x
 
 
@@ -197,85 +207,43 @@ class ResBlock(TimestepBlock):
         return self.skip_connection(x) + h
 
 
-class AttentionBlock(nn.Module):
-    """
-    An attention block that allows spatial positions to attend to each other.
+class FactorizedAttentionBlock(nn.Module):
 
-    Originally ported from here, but adapted to the N-d case.
-    https://github.com/hojonathanho/diffusion/blob/1e0dceb3b3495bbe19116a5e1b3596cd0706c543/diffusion_tf/models/unet.py#L66.
-    """
-
-    def __init__(self, channels, num_heads=1, use_checkpoint=False):
+    def __init__(self, channels, num_heads, use_rpe_net, time_embed_dim=None, use_checkpoint=False):
         super().__init__()
-        self.channels = channels
-        self.num_heads = num_heads
-        self.use_checkpoint = use_checkpoint
+        self.spatial_attention = RPEAttention(
+            channels=channels, num_heads=num_heads, use_checkpoint=use_checkpoint,
+            use_rpe_q=False, use_rpe_k=False, use_rpe_v=False,
+        )
+        self.temporal_attention = RPEAttention(
+            channels=channels, num_heads=num_heads, use_checkpoint=use_checkpoint,
+            time_embed_dim=time_embed_dim, use_rpe_net=use_rpe_net,
+        )
 
-        self.norm = normalization(channels)
-        self.qkv = conv_nd(1, channels, channels * 3, 1)
-        self.attention = QKVAttention()
-        self.proj_out = zero_module(conv_nd(1, channels, channels, 1))
+    def forward(self, x, attn_mask, temb, T, frame_indices=None, attn_weights_list=None):
+        BT, C, H, W = x.shape
+        B = BT//T
+        # reshape to have T in the last dimension becuase that's what we attend over
+        x = x.view(B, T, C, H, W).permute(0, 3, 4, 2, 1)  # B, H, W, C, T
+        x = x.reshape(B, H*W, C, T)
+        x = self.temporal_attention(x,
+                                    temb,
+                                    frame_indices,
+                                    attn_mask=attn_mask.flatten(start_dim=2).squeeze(dim=2), # B x T
+                                    attn_weights_list=None if attn_weights_list is None else attn_weights_list['temporal'],)
 
-    def forward(self, x):
-        return checkpoint(self._forward, (x,), self.parameters(), self.use_checkpoint)
-
-    def _forward(self, x):
-        b, c, *spatial = x.shape
-        x = x.reshape(b, c, -1)
-        qkv = self.qkv(self.norm(x))
-        qkv = qkv.reshape(b * self.num_heads, -1, qkv.shape[2])
-        h = self.attention(qkv)
-        h = h.reshape(b, -1, h.shape[-1])
-        h = self.proj_out(h)
-        return (x + h).reshape(b, c, *spatial)
-
-
-class QKVAttention(nn.Module):
-    """
-    A module which performs QKV attention.
-    """
-
-    def forward(self, qkv):
-        """
-        Apply QKV attention.
-
-        :param qkv: an [N x (C * 3) x T] tensor of Qs, Ks, and Vs.
-        :return: an [N x C x T] tensor after attention.
-        """
-        ch = qkv.shape[1] // 3
-        q, k, v = th.split(qkv, ch, dim=1)
-        scale = 1 / math.sqrt(math.sqrt(ch))
-        weight = th.einsum(
-            "bct,bcs->bts", q * scale, k * scale
-        )  # More stable with f16 than dividing afterwards
-        weight = th.softmax(weight.float(), dim=-1).type(weight.dtype)
-        return th.einsum("bts,bcs->bct", weight, v)
-
-    @staticmethod
-    def count_flops(model, _x, y):
-        """
-        A counter for the `thop` package to count the operations in an
-        attention operation.
-
-        Meant to be used like:
-
-            macs, params = thop.profile(
-                model,
-                inputs=(inputs, timestamps),
-                custom_ops={QKVAttention: QKVAttention.count_flops},
-            )
-
-        """
-        b, c, *spatial = y[0].shape
-        num_spatial = int(np.prod(spatial))
-        # We perform two matmuls with the same number of ops.
-        # The first computes the weight matrix, the second computes
-        # the combination of the value vectors.
-        matmul_ops = 2 * b * (num_spatial ** 2) * c
-        model.total_ops += th.DoubleTensor([matmul_ops])
+        # Now we attend over the spatial dimensions by reshaping the input
+        x = x.view(B, H, W, C, T).permute(0, 4, 3, 1, 2)  # B, T, C, H, W
+        x = x.reshape(B, T, C, H*W)
+        x = self.spatial_attention(x,
+                                   temb,
+                                   frame_indices=None,
+                                   attn_weights_list=None if attn_weights_list is None else attn_weights_list['spatial'])
+        x = x.reshape(BT, C, H, W)
+        return x
 
 
-class UNetModel(nn.Module):
+class UNetVideoModel(nn.Module):
     """
     The full UNet model with attention and timestep embedding.
 
@@ -292,8 +260,6 @@ class UNetModel(nn.Module):
     :param conv_resample: if True, use learned convolutions for upsampling and
         downsampling.
     :param dims: determines if the signal is 1D, 2D, or 3D.
-    :param num_classes: if specified (as an int), then this model will be
-        class-conditional with `num_classes` classes.
     :param use_checkpoint: use gradient checkpointing to reduce memory usage.
     :param num_heads: the number of attention heads in each attention layer.
     """
@@ -305,22 +271,23 @@ class UNetModel(nn.Module):
         out_channels,
         num_res_blocks,
         attention_resolutions,
+        image_size=None,
         dropout=0,
         channel_mult=(1, 2, 4, 8),
         conv_resample=True,
         dims=2,
-        num_classes=None,
         use_checkpoint=False,
         num_heads=1,
         num_heads_upsample=-1,
         use_scale_shift_norm=False,
+        use_rpe_net=False,
     ):
         super().__init__()
 
         if num_heads_upsample == -1:
             num_heads_upsample = num_heads
 
-        self.in_channels = in_channels
+        self.in_channels = in_channels + 1
         self.model_channels = model_channels
         self.out_channels = out_channels
         self.num_res_blocks = num_res_blocks
@@ -328,10 +295,10 @@ class UNetModel(nn.Module):
         self.dropout = dropout
         self.channel_mult = channel_mult
         self.conv_resample = conv_resample
-        self.num_classes = num_classes
         self.use_checkpoint = use_checkpoint
         self.num_heads = num_heads
         self.num_heads_upsample = num_heads_upsample
+        self.use_rpe_net = use_rpe_net
 
         time_embed_dim = model_channels * 4
         self.time_embed = nn.Sequential(
@@ -340,13 +307,10 @@ class UNetModel(nn.Module):
             linear(time_embed_dim, time_embed_dim),
         )
 
-        if self.num_classes is not None:
-            self.label_emb = nn.Embedding(num_classes, time_embed_dim)
-
         self.input_blocks = nn.ModuleList(
             [
-                TimestepEmbedSequential(
-                    conv_nd(dims, in_channels, model_channels, 3, padding=1)
+                TimestepEmbedAttnThingsSequential(
+                    conv_nd(dims, self.in_channels, model_channels, 3, padding=1)
                 )
             ]
         )
@@ -369,20 +333,20 @@ class UNetModel(nn.Module):
                 ch = mult * model_channels
                 if ds in attention_resolutions:
                     layers.append(
-                        AttentionBlock(
-                            ch, use_checkpoint=use_checkpoint, num_heads=num_heads
+                        FactorizedAttentionBlock(
+                            ch, use_checkpoint=use_checkpoint, num_heads=num_heads, use_rpe_net=use_rpe_net, time_embed_dim=time_embed_dim,
                         )
                     )
-                self.input_blocks.append(TimestepEmbedSequential(*layers))
+                self.input_blocks.append(TimestepEmbedAttnThingsSequential(*layers))
                 input_block_chans.append(ch)
             if level != len(channel_mult) - 1:
                 self.input_blocks.append(
-                    TimestepEmbedSequential(Downsample(ch, conv_resample, dims=dims))
+                    TimestepEmbedAttnThingsSequential(Downsample(ch, conv_resample, dims=dims))
                 )
                 input_block_chans.append(ch)
                 ds *= 2
-
-        self.middle_block = TimestepEmbedSequential(
+        
+        self.middle_block = TimestepEmbedAttnThingsSequential(
             ResBlock(
                 ch,
                 time_embed_dim,
@@ -391,7 +355,7 @@ class UNetModel(nn.Module):
                 use_checkpoint=use_checkpoint,
                 use_scale_shift_norm=use_scale_shift_norm,
             ),
-            AttentionBlock(ch, use_checkpoint=use_checkpoint, num_heads=num_heads),
+            FactorizedAttentionBlock(ch, use_checkpoint=use_checkpoint, num_heads=num_heads, use_rpe_net=use_rpe_net, time_embed_dim=time_embed_dim),
             ResBlock(
                 ch,
                 time_embed_dim,
@@ -419,16 +383,18 @@ class UNetModel(nn.Module):
                 ch = model_channels * mult
                 if ds in attention_resolutions:
                     layers.append(
-                        AttentionBlock(
+                        FactorizedAttentionBlock(
                             ch,
                             use_checkpoint=use_checkpoint,
                             num_heads=num_heads_upsample,
+                            use_rpe_net=use_rpe_net,
+                            time_embed_dim=time_embed_dim,
                         )
                     )
                 if level and i == num_res_blocks:
                     layers.append(Upsample(ch, conv_resample, dims=dims))
                     ds //= 2
-                self.output_blocks.append(TimestepEmbedSequential(*layers))
+                self.output_blocks.append(TimestepEmbedAttnThingsSequential(*layers))
 
         self.out = nn.Sequential(
             normalization(ch),
@@ -459,7 +425,9 @@ class UNetModel(nn.Module):
         """
         return next(self.input_blocks.parameters()).dtype
 
-    def forward(self, x, timesteps, y=None):
+    def forward(self, x, *, x0, timesteps, frame_indices=None,
+                obs_mask=None, latent_mask=None, return_attn_weights=False
+            ):
         """
         Apply the model to an input batch.
 
@@ -468,27 +436,32 @@ class UNetModel(nn.Module):
         :param y: an [N] Tensor of labels, if class-conditional.
         :return: an [N x C x ...] Tensor of outputs.
         """
-        assert (y is not None) == (
-            self.num_classes is not None
-        ), "must specify y if and only if the model is class-conditional"
-
+        B, T, C, H, W = x.shape
+        timesteps = timesteps.view(B, 1).expand(B, T)
+        attn_mask = (obs_mask + latent_mask).clip(max=1)
+        # add channel to indicate obs
+        indicator_template = th.ones_like(x[:, :, :1, :, :])
+        obs_indicator = indicator_template * obs_mask
+        x = th.cat([x*(1-obs_mask) + x0*obs_mask,
+                    obs_indicator],
+                   dim=2,
+        )
+        x = x.reshape(B*T, self.in_channels, H, W)
+        timesteps = timesteps.reshape(B*T)
         hs = []
         emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
-
-        if self.num_classes is not None:
-            assert y.shape == (x.shape[0],)
-            emb = emb + self.label_emb(y)
-
         h = x.type(self.inner_dtype)
-        for module in self.input_blocks:
-            h = module(h, emb)
+        attns = {'spatial': [], 'temporal': [], 'mixed': []} if return_attn_weights else None
+        for layer, module in enumerate(self.input_blocks):
+            h = module(h, emb,  attn_mask, T=T, attn_weights_list=attns, frame_indices=frame_indices)
             hs.append(h)
-        h = self.middle_block(h, emb)
+        h = self.middle_block(h, emb,  attn_mask, T=T, attn_weights_list=attns, frame_indices=frame_indices)
         for module in self.output_blocks:
             cat_in = th.cat([h, hs.pop()], dim=1)
-            h = module(cat_in, emb)
+            h = module(cat_in, emb,  attn_mask, T=T, attn_weights_list=attns, frame_indices=frame_indices)
         h = h.type(x.dtype)
-        return self.out(h)
+        out = self.out(h)
+        return out.view(B, T, self.out_channels, H, W), attns
 
     def get_feature_vectors(self, x, timesteps, y=None):
         """
@@ -505,9 +478,6 @@ class UNetModel(nn.Module):
         """
         hs = []
         emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
-        if self.num_classes is not None:
-            assert y.shape == (x.shape[0],)
-            emb = emb + self.label_emb(y)
         result = dict(down=[], up=[])
         h = x.type(self.inner_dtype)
         for module in self.input_blocks:

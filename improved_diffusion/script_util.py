@@ -1,11 +1,9 @@
 import argparse
-import inspect
 
 from . import gaussian_diffusion as gd
 from .respace import SpacedDiffusion, space_timesteps
-from .unet import UNetModel
+from .unet import UNetVideoModel
 
-NUM_CLASSES = 1000
 
 
 def model_and_diffusion_defaults():
@@ -32,6 +30,7 @@ def model_and_diffusion_defaults():
         rescale_learned_sigmas=True,
         use_checkpoint=False,
         use_scale_shift_norm=True,
+        use_rpe_net=True,
     )
 
 
@@ -55,6 +54,7 @@ def create_model_and_diffusion(
     rescale_learned_sigmas,
     use_checkpoint,
     use_scale_shift_norm,
+    use_rpe_net,
 ):
     model = create_model(
         image_size,
@@ -68,6 +68,7 @@ def create_model_and_diffusion(
         num_heads_upsample=num_heads_upsample,
         use_scale_shift_norm=use_scale_shift_norm,
         dropout=dropout,
+        use_rpe_net=use_rpe_net,
     )
     diffusion = create_gaussian_diffusion(
         steps=diffusion_steps,
@@ -95,6 +96,7 @@ def create_model(
     num_heads_upsample,
     use_scale_shift_norm,
     dropout,
+    use_rpe_net,
 ):
     if image_size == 256:
         channel_mult = (1, 1, 2, 2, 4, 4)
@@ -109,19 +111,20 @@ def create_model(
     for res in attention_resolutions.split(","):
         attention_ds.append(image_size // int(res))
 
-    return UNetModel(
+    return UNetVideoModel(
         in_channels=3,
         model_channels=num_channels,
         out_channels=(3 if not learn_sigma else 6),
         num_res_blocks=num_res_blocks,
         attention_resolutions=tuple(attention_ds),
+        image_size=image_size,
         dropout=dropout,
         channel_mult=channel_mult,
-        num_classes=(NUM_CLASSES if class_cond else None),
         use_checkpoint=use_checkpoint,
         num_heads=num_heads,
         num_heads_upsample=num_heads_upsample,
         use_scale_shift_norm=use_scale_shift_norm,
+        use_rpe_net=use_rpe_net,
     )
 
 

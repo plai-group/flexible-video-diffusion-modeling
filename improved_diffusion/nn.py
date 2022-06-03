@@ -83,10 +83,12 @@ def scale_module(module, scale):
     return module
 
 
-def mean_flat(tensor):
+def mean_flat(tensor, mask=None):
     """
     Take the mean over all non-batch dimensions.
     """
+    if mask is not None:
+        tensor = tensor * mask
     return tensor.mean(dim=list(range(1, len(tensor.shape))))
 
 

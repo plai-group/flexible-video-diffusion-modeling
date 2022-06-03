@@ -19,10 +19,14 @@ class Logger(object):
     def __init__(self):
         self.name2val = defaultdict(float)  # values this iteration
         self.name2cnt = defaultdict(int)
+        self.nondistributed_name2val = defaultdict(float)
         self.comm = MPI.COMM_WORLD
 
-    def logkv(self, key, val):
-        self.name2val[key] = val
+    def logkv(self, key, val, distributed=True):
+        if distributed:
+            self.name2val[key] = val
+        else:
+            self.nondistributed_name2val[key] = val
 
     def logkv_mean(self, key, val):
         oldval, cnt = self.name2val[key], self.name2cnt[key]
@@ -44,9 +48,10 @@ class Logger(object):
                 d["dummy"] = 1  # so we don't get a warning about empty dict
         out = d.copy()  # Return the dict for unit testing purposes
         if self.comm is None or self.comm.rank == 0:
-            wandb.log(self.name2val)
+            wandb.log({**self.name2val, **self.nondistributed_name2val})
         self.name2val.clear()
         self.name2cnt.clear()
+        self.nondistributed_name2val.clear()
         return out
 
 logger = Logger()
