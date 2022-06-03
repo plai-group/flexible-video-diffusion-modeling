@@ -19,6 +19,11 @@ export WANDB_ENTITY=<...>
 export WANDB_PROJECT=<...>
 ```
 
+And add a directory for checkpoints to be saved in:
+```
+mkdir checkpoints
+```
+
 ## Preparing Data
 TODO
 
