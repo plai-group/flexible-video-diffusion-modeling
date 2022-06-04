@@ -170,9 +170,9 @@ class BaseDataset(Dataset):
 
 
 class CarlaDataset(BaseDataset):
-    def __init__(self, train, shard, num_shards, T):
+    def __init__(self, train, path, shard, num_shards, T):
+        super().__init__(path=path, T=T)
         self.split_path = self.path / f"video_{'train' if train else 'test'}.csv"
-        super().__init__(path=self.split_path, T=T)
         self.cache_file(self.split_path)
         self.fnames = [line.rstrip('\n').split('/')[-1] for line in open(self.split_path, 'r').readlines() if '.pt' in line]
         self.fnames = self.fnames[shard::num_shards]

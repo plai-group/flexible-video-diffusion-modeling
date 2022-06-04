@@ -20,6 +20,15 @@ export WANDB_PROJECT=<...>
 ```
 
 ## Preparing Data
+### CARLA Town01
+Download CARLA Town01 with our download script as follows.
+```
+cd datasets/carla
+bash download.sh
+cd ../..
+```
+
+### MineRL and GQN-Mazes
 TODO
 
 ## Training

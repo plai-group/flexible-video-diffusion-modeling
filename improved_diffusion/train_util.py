@@ -57,8 +57,6 @@ class TrainLoop:
         args,
     ):
         self.args = args
-        if not args.resume_id:
-            os.makedirs(get_blob_logdir(args))
         self.model = model
         self.diffusion = diffusion
         self.data = data
@@ -127,6 +125,8 @@ class TrainLoop:
                 )
             self.use_ddp = False
             self.ddp_model = self.model
+        if dist.get_rank() == 0:
+            logger.logkv("num_parameters", sum(p.numel() for p in model.parameters()), distributed=False)
 
     def _load_and_sync_parameters(self):
         resume_checkpoint = find_resume_checkpoint(self.args) or self.resume_checkpoint
@@ -365,6 +365,8 @@ class TrainLoop:
             logger.logkv("lg_loss_scale", self.lg_loss_scale)
 
     def save(self):
+        if dist.get_rank() == 0:
+            Path(get_blob_logdir(self.args)).mkdir(parents=True, exist_ok=True)
         def save_checkpoint(rate, params):
             if dist.get_rank() == 0:
                 print(f"saving model {rate}...")
@@ -439,12 +441,14 @@ class TrainLoop:
                 batch.shape,
                 clip_denoised=True,
                 model_kwargs={
-                    'frame_indices': frame_indices,
-                    'x0': batch, 'obs_mask': obs_mask,
-                    'latent_mask': latent_mask},
+                    'frame_indices': frame_indices.to(dist_util.dev()),
+                    'x0': batch.to(dist_util.dev()),
+                    'obs_mask': obs_mask.to(dist_util.dev()),
+                    'latent_mask': latent_mask.to(dist_util.dev())},
                 latent_mask=latent_mask,
                 return_attn_weights=True,
             )
+            samples = samples.cpu() * latent_mask + batch * obs_mask
             _mark_as_observed(samples[:, :n_obs])
             samples = ((samples + 1) * 127.5).clamp(0, 255).to(th.uint8).cpu().numpy()
             for i, video in enumerate(samples):
@@ -491,11 +495,13 @@ def get_blob_logdir(args):
 def find_resume_checkpoint(args):
     # On your infrastructure, you may want to override this to automatically
     # discover the latest checkpoint on your blob storage, etc.
-   ckpts = glob.glob(os.path.join(get_blob_logdir(args), "model*.pt"))
-   if len(ckpts) == 0:
-       return None
-   iters_fnames = {int(Path(fname).stem.replace('model', '')): fname for fname in ckpts}
-   return iters_fnames[max(iters_fnames.keys())]
+    if not args.resume_id:
+        return
+    ckpts = glob.glob(os.path.join(get_blob_logdir(args), "model*.pt"))
+    if len(ckpts) == 0:
+        return None
+    iters_fnames = {int(Path(fname).stem.replace('model', '')): fname for fname in ckpts}
+    return iters_fnames[max(iters_fnames.keys())]
 
 
 def find_ema_checkpoint(main_checkpoint, step, rate):
