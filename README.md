@@ -19,6 +19,11 @@ export WANDB_ENTITY=<...>
 export WANDB_PROJECT=<...>
 ```
 
+And add a directory for checkpoints to be saved in:
+```
+mkdir checkpoints
+```
+
 ## Preparing Data
 ### CARLA Town01
 Download CARLA Town01 with our download script as follows.
