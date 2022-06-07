@@ -53,3 +53,13 @@ def get_model_results_path(args):
         return Path("results") / path.parent / name
     else:
         return Path(args.eval_dir)
+
+
+def get_eval_run_identifier(args):
+    res = args.sampling_scheme
+    if hasattr(args, "optimality") and args.optimality is not None:
+        res += f"_optimal-{args.optimality}"
+    res += f"_{args.max_frames}_{args.max_latent_frames}_{args.T}_{args.n_obs}"
+    if hasattr(args, "dataset_partition") and args.dataset_partition == "train":
+        res = "trainset_" + res
+    return res
