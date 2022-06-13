@@ -4,8 +4,11 @@ numpy array. This can be used to produce samples for FID evaluation.
 """
 
 import argparse
+from operator import is_
 import os
 import json
+from pathlib import Path
+from PIL import Image
 
 import numpy as np
 import torch
@@ -23,7 +26,7 @@ from improved_diffusion.video_datasets import get_test_dataset
 
 
 @torch.no_grad()
-def infer_video(args, model, diffusion, batch):
+def sample_video(args, model, diffusion, batch, just_get_indices=False):
     """
     batch has a shape of BxTxCxHxW where
     B: batch size
@@ -41,39 +44,44 @@ def infer_video(args, model, diffusion, batch):
         optimal_schedule_path=optimal_schedule_path,
     ))
 
+    indices_used = []
     while True:
         frame_indices_iterator.set_videos(samples.to(args.device))  # ignored for non-adaptive sampling schemes
         try:
             obs_frame_indices, latent_frame_indices = next(frame_indices_iterator)
         except StopIteration:
             break
-        print(f"Conditioning on {sorted(obs_frame_indices)} frames, predicting {sorted(latent_frame_indices)}.\n")
+        print(f"Conditioning on {sorted(obs_frame_indices)} frames, predicting {sorted(latent_frame_indices)}.")
         # Prepare network's input
         frame_indices = torch.cat([torch.tensor(obs_frame_indices), torch.tensor(latent_frame_indices)], dim=1)
         x0 = torch.stack([samples[i, fi] for i, fi in enumerate(frame_indices)], dim=0).clone()
         obs_mask = torch.cat([torch.ones_like(torch.tensor(obs_frame_indices)),
                               torch.zeros_like(torch.tensor(latent_frame_indices))], dim=1).view(B, -1, 1, 1, 1).float()
         latent_mask = 1 - obs_mask
-        # Prepare masks
-        print(f"{'Frame indices':20}: {frame_indices[0].cpu().numpy()}.")
-        print(f"{'Observation mask':20}: {obs_mask[0].cpu().int().numpy().squeeze()}")
-        print(f"{'Latent mask':20}: {latent_mask[0].cpu().int().numpy().squeeze()}")
-        print("-" * 40)
-        # Move tensors to the correct device
-        x0, obs_mask, latent_mask, frame_indices = (t.to(batch.device) for t in [x0, obs_mask, latent_mask, frame_indices])
-        # Run the network
-        local_samples, _ = diffusion.p_sample_loop(
-            model, x0.shape, clip_denoised=args.clip_denoised,
-            model_kwargs=dict(frame_indices=frame_indices,
-                              x0=x0,
-                              obs_mask=obs_mask,
-                              latent_mask=latent_mask),
-            latent_mask=latent_mask,
-            return_attn_weights=False)
-        # Fill in the generated frames
+        if just_get_indices:
+            local_samples = torch.stack([batch[i, ind] for i, ind in enumerate(frame_indices)])
+        else:
+            # Prepare masks
+            print(f"{'Frame indices':20}: {frame_indices[0].cpu().numpy()}.")
+            print(f"{'Observation mask':20}: {obs_mask[0].cpu().int().numpy().squeeze()}")
+            print(f"{'Latent mask':20}: {latent_mask[0].cpu().int().numpy().squeeze()}")
+            print("-" * 40)
+            # Move tensors to the correct device
+            x0, obs_mask, latent_mask, frame_indices = (t.to(batch.device) for t in [x0, obs_mask, latent_mask, frame_indices])
+            # Run the network
+            local_samples, _ = diffusion.p_sample_loop(
+                model, x0.shape, clip_denoised=args.clip_denoised,
+                model_kwargs=dict(frame_indices=frame_indices,
+                                  x0=x0,
+                               obs_mask=obs_mask,
+                                  latent_mask=latent_mask),
+                latent_mask=latent_mask,
+                return_attn_weights=False)
+            # Fill in the generated frames
         for i, li in enumerate(latent_frame_indices):
             samples[i, li] = local_samples[i, -len(li):].cpu()
-    return samples
+        indices_used.append((obs_frame_indices, latent_frame_indices))
+    return samples, indices_used
 
 
 def main(args, model, diffusion, dataset):
@@ -87,7 +95,7 @@ def main(args, model, diffusion, dataset):
             print(f"Nothing to do for the batches {min(batch_indices)} - {max(batch_indices)}, sample #{args.sample_idx}.")
             continue
         batch = torch.stack([dataset[i][0] for i in batch_indices])
-        samples = infer_video(args, model, diffusion, batch)
+        samples, _ = sample_video(args, model, diffusion, batch)
         drange = [-1, 1]
         samples = (samples.numpy() - drange[0]) / (drange[1] - drange[0]) * 255
         samples = samples.astype(np.uint8)
@@ -97,12 +105,70 @@ def main(args, model, diffusion, dataset):
                 print(f"*** Saved {output_filenames[i]} ***")
 
 
+def visualise(args, model, diffusion, dataset):
+    """
+    batch has a shape of BxTxCxHxW where
+    B: batch size
+    T: video length
+    CxWxH: image size
+    """
+    is_adaptive = "adaptive" in args.sampling_scheme
+    bs = args.batch_size if is_adaptive else 1
+    batch = next(iter(torch.utils.data.DataLoader(dataset, batch_size=bs, shuffle=False, drop_last=False)))[0]
+    _, indices = sample_video(args, model, diffusion, batch, just_get_indices=True)
+
+    def visualise_obs_lat_sequence(sequence, index):
+        """ if index is None, expects sequence to be a list of tuples of form (list, list)
+            if index is given, expects sequence to be a list of tuples of form (list of lists (from which index i is taken), list of lists (from which index i is taken))
+        """
+        vis = []
+        exist_indices = list(range(args.n_obs))
+        for obs_frame_indices, latent_frame_indices in sequence:
+            obs_frame_indices, latent_frame_indices = obs_frame_indices[index], latent_frame_indices[index]
+            exist_indices.extend(latent_frame_indices)
+            new_layer = torch.zeros((args.T, 3)).int()
+            border_colour = torch.tensor([0, 0, 0]).int()
+            not_sampled_colour = torch.tensor([255, 255, 255]).int()
+            exist_colour = torch.tensor([50, 50, 50]).int()
+            obs_colour = torch.tensor([50, 50, 255]).int()
+            latent_colour = torch.tensor([255, 69, 0]).int()
+            new_layer = torch.zeros((args.T, 3)).int()
+            new_layer[:, :] = not_sampled_colour
+            new_layer[exist_indices, :] = exist_colour
+            new_layer[obs_frame_indices, :] = obs_colour
+            new_layer[latent_frame_indices, :] = latent_colour
+            scale = 4
+            new_layer = new_layer.repeat_interleave(scale+1, dim=0)
+            new_layer[::(scale+1)] = border_colour
+            new_layer = torch.cat([new_layer, new_layer[:1]], dim=0)
+            vis.extend([new_layer.clone() for _ in range(scale+1)])
+            vis[-1][:] = border_colour
+        vis = torch.stack([vis[-1], *vis])
+        if not is_adaptive:
+            assert index == 0
+        fname = f"vis_{args.sampling_scheme}_sampling-{args.T}-given-{args.n_obs}_{args.max_latent_frames}-{args.max_frames}-chunks"
+        if args.optimality is not None:
+            fname += f"_optimal-{args.optimality}"
+        if is_adaptive:
+            fname += f"_index-{index}"
+        else:
+            assert index == 0
+        fname += '.png'
+        dir = Path("visualisations")
+        dir.mkdir(parents=True, exist_ok=True)
+        Image.fromarray(vis.numpy().astype(np.uint8)).save(dir / fname)
+        print(f"Saved to {str(dir / fname)}")
+
+    for i in range(len(batch)):
+        visualise_obs_lat_sequence(indices, i)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("checkpoint_path", type=str)
+    parser.add_argument("--sampling_scheme", required=True, choices=sampling_schemes.keys())
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--eval_dir", type=str, default=None)
-    parser.add_argument("--sampling_scheme", required=True, choices=sampling_schemes.keys())
     parser.add_argument("--n_obs", type=int, default=36, help="Number of observed frames at the beginning of the video. The rest are sampled.")
     parser.add_argument("--T", type=int, default=None, help="Length of the videos. If not specified, it will be inferred from the dataset.")
     parser.add_argument("--max_frames", type=int, default=None,
@@ -124,8 +190,11 @@ if __name__ == "__main__":
     # Prepare which indices to sample (for unconditional generation index does nothing except change file name)
     if args.stop_index is None:
         # assume we're in a slurm batch job, set start and stop_index accordingly
-        assert "SLURM_ARRAY_TASK_ID" in os.environ
-        task_id = int(os.environ["SLURM_ARRAY_TASK_ID"])
+        if "SLURM_ARRAY_TASK_ID" in os.environ:
+            task_id = int(os.environ["SLURM_ARRAY_TASK_ID"])
+        else:
+            print("Warning: assuming we're not in a slurm batch job, only sampling first batch.")
+            task_id = 0
         args.start_index = task_id * args.batch_size
         args.stop_index = (task_id + 1) * args.batch_size
     args.indices = list(range(args.start_index, args.stop_index))
@@ -156,7 +225,7 @@ if __name__ == "__main__":
     args.T = dataset.T
 
     if args.just_visualise:
-        visualise(args)  # TODO
+        visualise(args, model, diffusion, dataset)
         exit()
 
     # Prepare samples directory

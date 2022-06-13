@@ -1,3 +1,4 @@
+visualisations/
 datasets/cifar_*
 wandb
 checkpoints
