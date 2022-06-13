@@ -37,11 +37,34 @@ cd ../..
 TODO
 
 ## Training
-Testing with:
+### Running on CARLA Town01
+We train models on CARLA Town01 on an A100 GPU with the command:
 ```
-python scripts/video_train.py --dataset mazes_cwvae --batch_size 3 --diffusion_steps 32 --num_res_blocks 1 --num_channels 32 --max_frames 4 --ema_rate 0.5 --sample_interval 50
+python scripts/video_train.py --batch_size=2 --max_frames 20 --dataset=carla_no_traffic --num_res_blocks=1
 ```
-After training for >`save_interval` iterations, we can kill and resume training from the latest job with
+### Debugging/running on smaller GPUs
+To train on smaller GPUs without exceeding CUDA memory limits, you can try reducing `--max_frames` from e.g. 20 to 5, `--batch_size` from 2 to 1, and `--num_channels` from the default 128 to e.g. 32.
+
+### Debugging with faster feedback loops
+All of the previous suggestions for running on smaller GPUs will usually also speed up training. To more quickly check for major issues with training, you can decrease `--sample_interval` from the default 50000 to e.g. 1000 so that samples are logged to wandb more often, and decrease `--diffusion_steps` from the default 1000 to e.g. 32 so that logging samples is faster.
+
+### Resuming after training ends/fails
+After training for more than `save_interval` iterations (50000 by default), we can kill and resume training from the latest checkpoint with:
 ```
-python scripts/video_train.py --dataset mazes_cwvae --batch_size 3 --diffusion_steps 32 --num_res_blocks 1 --num_channels 32 --max_frames 4 --ema_rate 0.5 --sample_interval 50 --wandb_id <WANDB ID OF RUN WE ARE RESUMING>
+python scripts/video_train.py <ORIGINAL ARGUMENTS> --wandb_id <WANDB ID OF RUN WE ARE RESUMING>
+```
+e.g.
+```
+python scripts/video_train.py --batch_size=2 --max_frames 20 --dataset=carla_no_traffic --num_res_blocks=1 --wandb_id 1v1myd4c
+```
+
+
+## Sampling
+Checkpoints are saved throughout training to paths of the form `checkpoints/<WANDB ID>/model<NUMBER OF ITERATIONS>.pt` and `checkpoints/<WANDB ID>/ema_<EMA RATE>_<NUMBER OF ITERATIONS>.pt` respectively. Best results can usually be obtained from the exponential moving averages (EMAs) of model weights saved in the latter form. Given a trained checkpoint, we can sample from it with a command like
+```
+python scripts/video_sample.py <CHECKPOINT PATH> --batch_size 2 --sampling_scheme <SAMPLING SCHEME> --stop_index <STOP INDEX> --n_obs <N OBS>
+```
+which will sample completions for the first <STOP INDEX> test videos, each conditioned on the first <N OBS> frames (where <N OBS> may be zero). The dataset to use and other hyperparameters are inferred from the specified checkpoint. The <SAMPLING SCHEME> should be one of those defined in `improved_diffusion/sampling_schemes.py`, most of which are described in the paper. Options include, "autoreg", "long-range", "hierarchy-2", "adaptive-autoreg", "adaptive-hierarchy-2". The final command will look something like:
+```
+python scripts/video_sample.py checkpoints/2f1gq6ud/ema_0.9999_550000.pt --batch_size 2 --sampling_scheme autoreg --stop_index 100
 ```
