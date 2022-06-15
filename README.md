@@ -13,6 +13,10 @@ pip install torch torchvision wandb blobfile tqdm moviepy imageio
 pip install -e .
 ```
 
+For sampling with the adaptive sampling schemes (adaptive-autoreg and adaptive-hierarchy-2), also install the `lpips` package with e.g. `pip install lpips`.
+
+To run `scripts/video_fvd.py`, tensorflow and tensorflow\_hub are required. Install with e.g. `pip install tensorflow==2.8 tensorflow_hub==0.12.0`.
+
 This repo logs to wandb, using the wandb entity/username and project name set by:
 ```
 export WANDB_ENTITY=<...>
