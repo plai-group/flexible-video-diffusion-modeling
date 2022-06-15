@@ -67,16 +67,17 @@ def sample_video(args, model, diffusion, batch, just_get_indices=False):
             print(f"{'Latent mask':20}: {latent_mask[0].cpu().int().numpy().squeeze()}")
             print("-" * 40)
             # Move tensors to the correct device
-            x0, obs_mask, latent_mask, frame_indices = (t.to(batch.device) for t in [x0, obs_mask, latent_mask, frame_indices])
+            x0, obs_mask, latent_mask, frame_indices = (t.to(args.device) for t in [x0, obs_mask, latent_mask, frame_indices])
             # Run the network
             local_samples, _ = diffusion.p_sample_loop(
                 model, x0.shape, clip_denoised=args.clip_denoised,
                 model_kwargs=dict(frame_indices=frame_indices,
                                   x0=x0,
-                               obs_mask=obs_mask,
+                                  obs_mask=obs_mask,
                                   latent_mask=latent_mask),
                 latent_mask=latent_mask,
                 return_attn_weights=False)
+            print('local samples', local_samples.min(), local_samples.max())
             # Fill in the generated frames
         for i, li in enumerate(latent_frame_indices):
             samples[i, li] = local_samples[i, -len(li):].cpu()
