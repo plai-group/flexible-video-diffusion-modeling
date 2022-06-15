@@ -73,10 +73,11 @@ def sample_video(args, model, diffusion, batch, just_get_indices=False):
                 model, x0.shape, clip_denoised=args.clip_denoised,
                 model_kwargs=dict(frame_indices=frame_indices,
                                   x0=x0,
-                               obs_mask=obs_mask,
+                                  obs_mask=obs_mask,
                                   latent_mask=latent_mask),
                 latent_mask=latent_mask,
                 return_attn_weights=False)
+            print('local samples', local_samples.min(), local_samples.max())
             # Fill in the generated frames
         for i, li in enumerate(latent_frame_indices):
             samples[i, li] = local_samples[i, -len(li):].cpu()
