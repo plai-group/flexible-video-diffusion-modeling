@@ -176,7 +176,7 @@ class CarlaDataset(BaseDataset):
         self.cache_file(self.split_path)
         self.fnames = [line.rstrip('\n').split('/')[-1] for line in open(self.split_path, 'r').readlines() if '.pt' in line]
         self.fnames = self.fnames[shard::num_shards]
-        print(f"Training on {len(self.fnames)} files (Carla dataset).")
+        print(f"Loading {len(self.fnames)} files (Carla dataset).")
 
     def loaditem(self, path):
         return torch.load(path)
