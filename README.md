@@ -6,10 +6,8 @@ This codebase is based off that of [Improved Denoising Diffusion Probabilistic M
 
 # Usage
 
-Tested with Python 3.10 in a conda environment. Requires `ffmpeg`. Install Python requirements as follows (run from inside git repo).
+Tested with Python 3.10 in a conda environment. We require the Python packages `mpi4py torch torchvision wandb blobfile tqdm moviepy imageio` as well as the command line tool `ffmpeg`. This repository itself should also be installed by running
 ```
-conda install -c conda-forge mpi4py
-pip install torch torchvision wandb blobfile tqdm moviepy imageio
 pip install -e .
 ```
 
@@ -36,9 +34,6 @@ cd datasets/carla
 bash download.sh
 cd ../..
 ```
-
-### MineRL and GQN-Mazes
-TODO
 
 ## Training
 ### Running on CARLA Town01
@@ -73,7 +68,7 @@ which will sample completions for the first <STOP INDEX> test videos, each condi
 python scripts/video_sample.py checkpoints/2f1gq6ud/ema_0.9999_550000.pt --batch_size 2 --sampling_scheme autoreg --stop_index 100
 ```
 
-## Experimenting with different sampling schemes
+### Experimenting with different sampling schemes
 Our sampling schemes are defined in `improved_diffusion/sampling_schemes.py`, including all those presented in the paper. To add a new one, create a new subclass of `SamplingSchemeBase` with a `next_indices` function (returning a pair of vectors of observed and latent indices) in this file. Add it to the `sampling_schemes` dictionary (also in the same file) to allow your sampling scheme to be accessed by `scripts/video_sample.py`.
   
 For debugging, you can visualise the indices used by a sampling scheme with 
@@ -81,3 +76,55 @@ For debugging, you can visualise the indices used by a sampling scheme with
 python scripts/video_sample.py <ANY CHECKPOINT PATH> --sampling_scheme <SAMPLING SCHEME> --just_visualise
 ```
 The `--just_visualise` flag tells the script to save a .png visualisation to the `visualisations/` directory instead of sampling videos.
+  
+  
+### Directory structures
+Checkpoints are saved with the following directory structure
+```
+checkpoints
+├── .../<wandb id>
+│   ├── model_<step>.pt
+│   ├── ema_<ema_rate>_<step>.pt
+│   └── opt_<step>.pt
+└── ... (other runs)
+```
+Optionally, to better organise the results directories, you can make more descriptive directory names and move the checkpoints into them as follows. The results directory (containing samples etc.) will mirror this structure.
+```
+checkpoints
+├── <descriptive path>
+|   ├── <wandb id>
+│   |   └── ema_<ema_rate>_<step>.pt
+|   └── ... (other runs with same descriptive path)
+└── ... (other runs)
+```
+After running sampling scripts, a results directory will be created with structure:
+```
+results
+├── <descriptive path>
+│   ├── <wandb id>
+│   │   ├── <checkpoint name>
+│   │   │   ├── <sampling scheme descriptor>
+│   │   │   │   ├── samples
+│   │   │   │   │  ├── <name-1>.npy
+│   │   │   │   │  ├── <name-2>.npy
+│   │   │   │   │  ├── ...
+|   └── ... (other runs with same descriptive path)
+└── ... (other runs)
+```
+FVD scores and video files created by `scripts/video_fvd.py` and `scripts/video_make_mp4.py` will also be saved in the `results/<descriptive path>/<wandb id>/<checkpoint name>/<sampling scheme descriptor>` directory.
+  
+## Computing FVD scores
+After drawing sufficiently many samples (we use 100 for results reported in our paper), FVD scores can be computed with
+```
+python scripts/video_fvd.py  --eval_dir results/<descriptive path>/<wandb id>/<checkpoint name>/<sampling scheme descriptor> --num_videos <NUM VIDEOS>
+```
+Running this script will print the FVD as well as saving it in a file at `results/<descriptive path>/<wandb id>/<checkpoint name>/<sampling scheme descriptor>`.
+
+## View-able video formats
+Videos produced by `scripts/video_sample.py` are saved in `.npy` format. Save a video (or grid of sampled videos) in a `.gif` or `.mp4` format with
+```
+python scripts/video_make_mp4.py --eval_dir results/<descriptive path>/<wandb id>/<checkpoint name>/<sampling scheme descriptor>
+```
+  
+## Link to original (pre-refactor) codebase
+This is a refactored version of [our original codebase](https://github.com/wsgharvey/video-diffusion) with which the experiments in [the paper](https://arxiv.org/abs/2205.11495) were run. This refactored codebase is significantly cleaner and with less changes from the Improved DDPM repo it is based on, as well as having an architectural simplification vs [our original codebase](https://github.com/wsgharvey/video-diffusion) (we removed positional encodings). We have reproduced the main results with this refactored codebase. Much of the functionality which is listed in this repository as being committed by [wsgharvey](https://github.com/wsgharvey/) was originally written by [saeidnp](https://github.com/saeidnp/) or [vmasrani](https://github.com/vmasrani).
