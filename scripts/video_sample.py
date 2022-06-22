@@ -53,7 +53,7 @@ def sample_video(args, model, diffusion, batch, just_get_indices=False):
             break
         print(f"Conditioning on {sorted(obs_frame_indices)} frames, predicting {sorted(latent_frame_indices)}.")
         # Prepare network's input
-        frame_indices = torch.cat([torch.tensor(obs_frame_indices), torch.tensor(latent_frame_indices)], dim=1)
+        frame_indices = torch.cat([torch.tensor(obs_frame_indices), torch.tensor(latent_frame_indices)], dim=1).long()
         x0 = torch.stack([samples[i, fi] for i, fi in enumerate(frame_indices)], dim=0).clone()
         obs_mask = torch.cat([torch.ones_like(torch.tensor(obs_frame_indices)),
                               torch.zeros_like(torch.tensor(latent_frame_indices))], dim=1).view(B, -1, 1, 1, 1).float()
