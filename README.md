@@ -139,6 +139,10 @@ The regressor and classifier are run in tandem so both are required. After downl
 ```
 python scripts/video_to_world_coords.py --eval_dir results/<descriptive path>/<wandb id>/<checkpoint name>/<sampling scheme descriptor> --regressor_path checkpoints/carla-regressor/regressor_checkpoint.pth --classifier_path checkpoints/carla-regressor/classifier_checkpoint.pth
 ```
+Similarly, you can obtain the regressor's output on the dataset with
+```
+python scripts/video_to_world_coords.py --dataset_dir datasets/carla/no-traffic/ --regressor_path checkpoints/carla-regressor/regressor_checkpoint.pth --classifier_path checkpoints/carla-regressor/classifier_checkpoint.pth
+```
 
 We recommend using the pretrained classifier and regressor weights linked to above. To instead retrain these models run 
 ```
