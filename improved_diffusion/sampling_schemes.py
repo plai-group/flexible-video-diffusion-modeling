@@ -1,5 +1,5 @@
 import numpy as np
-import torch
+import torch as th
 
 
 try:
@@ -26,7 +26,7 @@ try:
                 feats[kk] = lpips.normalize_tensor(outs[kk])
             res = [self.not_spatial_average(self.scale_by_proj_weights(self.lins[kk], feats[kk]), keepdim=True)
                    for kk in range(self.L)]
-            return torch.cat(res, dim=1)
+            return th.cat(res, dim=1)
 except ImportError:
     print("Could not import lpips. Adaptive sampling schemes will not work.")
 
@@ -59,7 +59,7 @@ class SamplingSchemeBase:
         self._done_frames = set(range(self._num_obs))
         self._obs_frames = list(range(self._num_obs))
         self._step_size = step_size
-        self.optimal_schedule = None if optimal_schedule_path is None else torch.load(optimal_schedule_path)
+        self.optimal_schedule = None if optimal_schedule_path is None else th.load(optimal_schedule_path)
         self._current_step = 0 # Counts the number of steps.
         self.B = None
 
@@ -233,7 +233,7 @@ class AdaptiveSamplingSchemeBase(SamplingSchemeBase):
     def embed(self, indices):
         net = LpipsEmbedder(net='alex', spatial=False).to(self.videos.device)
         embs = [net(self.videos[:, i]) for i in indices]
-        return torch.stack(embs, dim=1)
+        return th.stack(embs, dim=1)
 
     def set_videos(self, videos):
         self.videos = videos

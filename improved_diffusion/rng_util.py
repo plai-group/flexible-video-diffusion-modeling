@@ -1,28 +1,28 @@
 import random
-import torch
+import torch as th
 import numpy as np
 
 
 def set_random_seed(seed):
     random.seed(seed)
-    torch.manual_seed(seed+1)
-    torch.cuda.manual_seed_all(seed+2)
+    th.manual_seed(seed+1)
+    th.cuda.manual_seed_all(seed+2)
     np.random.seed(seed+3)
 
 
 def get_random_state():
     return {
         "python": random.getstate(),
-        "torch": torch.get_rng_state(),
-        "cuda": torch.cuda.get_rng_state_all(),
+        "torch": th.get_rng_state(),
+        "cuda": th.cuda.get_rng_state_all(),
         "numpy": np.random.get_state()
     }
 
 
 def set_random_state(state):
     random.setstate(state["python"])
-    torch.set_rng_state(state["torch"])
-    torch.cuda.set_rng_state_all(state["cuda"])
+    th.set_rng_state(state["torch"])
+    th.cuda.set_rng_state_all(state["cuda"])
     np.random.set_state(state["numpy"])
 
 

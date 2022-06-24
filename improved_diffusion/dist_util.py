@@ -43,7 +43,7 @@ def setup_dist():
 
 def dev():
     """
-    Get the device to use for torch.distributed.
+    Get the device to use for th.distributed.
     """
     if th.cuda.is_available():
         return th.device(f"cuda:{MPI.COMM_WORLD.Get_rank() % GPUS_PER_NODE}")

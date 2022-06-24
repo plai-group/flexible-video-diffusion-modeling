@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 import argparse
 import numpy as np
-import torch
+import torch as th
 from torchvision import transforms
 import torchvision
 import torch.nn as nn
@@ -20,7 +20,7 @@ from functools import partial
 
 def video_to_image(fname, video_path, frame_path):
     coords_fname = fname.replace('.pt', '.npy').replace('video_', 'coords_')
-    video = torch.load(video_path / fname).numpy()
+    video = th.load(video_path / fname).numpy()
     coords = np.load(video_path / coords_fname)
     print("Processing video:", str(video_path / fname))
     for frame_idx, (frame, coord) in enumerate(zip(video, coords)):
@@ -36,7 +36,7 @@ def get_cell(coord):
     return cell
 
 
-class CarlaRegressorDataset(torch.utils.data.Dataset):
+class CarlaRegressorDataset(th.utils.data.Dataset):
 
     def __init__(self, train, path, transforms=None):
         """
@@ -130,7 +130,7 @@ def make_dataloaders(data_dir, with_transforms, batch_size):
     train_dataset = CarlaRegressorDataset(train=True, path=data_dir, transforms=train_transform)
     test_dataset = CarlaRegressorDataset(train=False, path=data_dir, transforms=base_data_transform)
 
-    make_loader = lambda dataset: torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=2)
+    make_loader = lambda dataset: th.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=2)
     train_loader = make_loader(train_dataset)
     test_loader = make_loader(test_dataset)
 
@@ -156,7 +156,7 @@ class MultiHeadEfficientNet_b7(nn.Module):
         coords = []
         for idx, cell in enumerate(cells):
             coords.append(self.regressors[cell](emb[idx]))
-        coords = torch.stack(coords)
+        coords = th.stack(coords)
         return coords
 
 
@@ -173,7 +173,7 @@ class MultiHeadResNet152(nn.Module):
         coords = []
         for idx, cell in enumerate(cells):
             coords.append(self.regressors[cell](emb[idx]))
-        coords = torch.stack(coords)
+        coords = th.stack(coords)
         return coords
 
 
@@ -222,7 +222,7 @@ def train():
     wandb.init(project=os.environ['WANDB_PROJECT'], entity=os.environ['WANDB_ENTITY'],
                config=args)
 
-    args.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    args.device = th.device("cuda:0" if th.cuda.is_available() else "cpu")
 
     model       = set_up_model(args.is_classifier, args.model, args.device)
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9)
@@ -251,7 +251,7 @@ def train():
 
                 optimizer.zero_grad()
 
-                with torch.set_grad_enabled(phase == 'train'):
+                with th.set_grad_enabled(phase == 'train'):
                     outputs = model(inputs) if args.is_classifier else model(inputs, cells)
                     if args.is_classifier:
                         loss = nn.BCELoss()(nn.Sigmoid()(outputs), cells)
@@ -274,7 +274,7 @@ def train():
             if phase == 'test' and epoch_loss < best_loss:
                 best_loss = epoch_loss
                 best_model_wts = copy.deepcopy(model.state_dict())
-                torch.save(model.state_dict(), os.path.join(wandb.run.dir, f"model_{epoch}.pth"))
+                th.save(model.state_dict(), os.path.join(wandb.run.dir, f"model_{epoch}.pth"))
                 wandb.save(os.path.join(wandb.run.dir, f"model_{epoch}.pth"))
 
 
@@ -290,14 +290,14 @@ def train():
 def load_classifier_regressor_like_paper(classifier_path, regressor_path, device):
     classifier = set_up_model(is_classifier=True, model_name='resnet152', device=device, pretrained=False)
     regressor = set_up_model(is_classifier=False, model_name='resnet152', device=device, pretrained=False)
-    classifier.load_state_dict(torch.load(classifier_path))
-    regressor.load_state_dict(torch.load(regressor_path))
+    classifier.load_state_dict(th.load(classifier_path))
+    regressor.load_state_dict(th.load(regressor_path))
     classifier.eval()
     regressor.eval()
     return classifier.to(device), regressor.to(device)
 
 
-@torch.no_grad()
+@th.no_grad()
 def predict_coord_batch(frames, classifier, regressor):
     orig_device = frames.device
     device = next(classifier.parameters()).device
@@ -312,4 +312,4 @@ def predict_coords(frames, classifier, regressor, batch_size):
         some_frames = frames[:batch_size]
         frames = frames[batch_size:]
         coords.append(predict_coord_batch(some_frames, classifier, regressor))
-    return torch.cat(coords, dim=0)
+    return th.cat(coords, dim=0)
