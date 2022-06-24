@@ -57,19 +57,28 @@ e.g.
 python scripts/video_train.py --batch_size=2 --max_frames 20 --dataset=carla_no_traffic --num_res_blocks=1 --wandb_id 1v1myd4c
 ```
 
+## Downloading pretrained checkpoints
+We release a checkpoint for the Carla Town01 dataset which can be downloaded as follows
+```
+mkdir -p checkpoints/pretrained/1v1myd4b/
+cd checkpoints/pretrained/1v1myd4b/
+wget https://www.cs.ubc.ca/~wsgh/fdm/carla-fdm-ckpts/1v1myd4b/ema_0.9999_550000.pt
+cd ../../..
+```
+and then sampled from as described in the following section by replacing `<CHECKPOINT PATH>` with `checkpoints/pretrained/1v1myd4b/ema_0.9999_550000.pt`. This checkpoint is different from those reported in [our preprint](https://arxiv.org/abs/2205.11495), but we have verified that it produces similar results, with FVD scores of 124 when sampling with Hierarchy-2 and 246 when sampling with Autoreg.
 
 ## Sampling
 Checkpoints are saved throughout training to paths of the form `checkpoints/<WANDB ID>/model<NUMBER OF ITERATIONS>.pt` and `checkpoints/<WANDB ID>/ema_<EMA RATE>_<NUMBER OF ITERATIONS>.pt` respectively. Best results can usually be obtained from the exponential moving averages (EMAs) of model weights saved in the latter form. Given a trained checkpoint, we can sample from it with a command like
 ```
 python scripts/video_sample.py <CHECKPOINT PATH> --batch_size 2 --sampling_scheme <SAMPLING SCHEME> --stop_index <STOP INDEX> --n_obs <N OBS>
 ```
-which will sample completions for the first <STOP INDEX> test videos, each conditioned on the first <N OBS> frames (where <N OBS> may be zero). The dataset to use and other hyperparameters are inferred from the specified checkpoint. The <SAMPLING SCHEME> should be one of those defined in `improved_diffusion/sampling_schemes.py`, most of which are described in the paper. Options include, "autoreg", "long-range", "hierarchy-2", "adaptive-autoreg", "adaptive-hierarchy-2". The final command will look something like:
+which will sample completions for the first <STOP INDEX> test videos, each conditioned on the first <N OBS> frames (where <N OBS> may be zero). The dataset to use and other hyperparameters are inferred from the specified checkpoint. The <SAMPLING SCHEME> should be one of those defined in `improved_diffusion/sampling_schemes.py`, most of which are described in [our preprint](https://arxiv.org/abs/2205.11495). Options include, "autoreg", "long-range", "hierarchy-2", "adaptive-autoreg", "adaptive-hierarchy-2". The final command will look something like:
 ```
 python scripts/video_sample.py checkpoints/2f1gq6ud/ema_0.9999_550000.pt --batch_size 2 --sampling_scheme autoreg --stop_index 100
 ```
 
 ### Experimenting with different sampling schemes
-Our sampling schemes are defined in `improved_diffusion/sampling_schemes.py`, including all those presented in the paper. To add a new one, create a new subclass of `SamplingSchemeBase` with a `next_indices` function (returning a pair of vectors of observed and latent indices) in this file. Add it to the `sampling_schemes` dictionary (also in the same file) to allow your sampling scheme to be accessed by `scripts/video_sample.py`.
+Our sampling schemes are defined in `improved_diffusion/sampling_schemes.py`, including all those presented in [our preprint](https://arxiv.org/abs/2205.11495). To add a new one, create a new subclass of `SamplingSchemeBase` with a `next_indices` function (returning a pair of vectors of observed and latent indices) in this file. Add it to the `sampling_schemes` dictionary (also in the same file) to allow your sampling scheme to be accessed by `scripts/video_sample.py`.
   
 For debugging, you can visualise the indices used by a sampling scheme with 
 ```
@@ -114,7 +123,7 @@ results
 FVD scores and video files created by `scripts/video_fvd.py` and `scripts/video_make_mp4.py` will also be saved in the `results/<descriptive path>/<wandb id>/<checkpoint name>/<sampling scheme descriptor>` directory.
   
 ## Computing FVD scores
-After drawing sufficiently many samples (we use 100 for results reported in our paper), FVD scores can be computed with
+After drawing sufficiently many samples (we use 100 for results reported in [our preprint](https://arxiv.org/abs/2205.11495)), FVD scores can be computed with
 ```
 python scripts/video_fvd.py  --eval_dir results/<descriptive path>/<wandb id>/<checkpoint name>/<sampling scheme descriptor> --num_videos <NUM VIDEOS>
 ```
@@ -155,4 +164,5 @@ python scripts/carla_regressor_train.py --data_dir datasets/carla/no-traffic --i
 for the regressor.
   
 ## Link to original (pre-refactor) codebase
-This is a refactored version of [our original codebase](https://github.com/wsgharvey/video-diffusion) with which the experiments in [the paper](https://arxiv.org/abs/2205.11495) were run. This refactored codebase is significantly cleaner and with less changes from the Improved DDPM repo it is based on, as well as having an architectural simplification vs [our original codebase](https://github.com/wsgharvey/video-diffusion) (we removed positional encodings). We have reproduced the main results with this refactored codebase. Much of the functionality which is listed in this repository as being committed by [wsgharvey](https://github.com/wsgharvey/) was originally written by [saeidnp](https://github.com/saeidnp/) or [vmasrani](https://github.com/vmasrani).
+This is a refactored version of [our original codebase](https://github.com/wsgharvey/video-diffusion) with which the experiments in [the preprint](https://arxiv.org/abs/2205.11495) were run. This refactored codebase is cleaner and with less changes from the Improved DDPM repo it is based on, as well as having an architectural simplification vs [our original codebase](https://github.com/wsgharvey/video-diffusion) (we removed positional encodings). We have reproduced the main results with this refactored codebase. Much of code in this repository which is listed as being committed by [wsgharvey](https://github.com/wsgharvey/) was originally written by [saeidnp](https://github.com/saeidnp/) or [vmasrani](https://github.com/vmasrani).
+"Optimizing" sampling schemes as described in [our preprint](https://arxiv.org/abs/2205.11495) is currently only implemented in the [original codebase](https://github.com/wsgharvey/video-diffusion).
