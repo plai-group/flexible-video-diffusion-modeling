@@ -139,6 +139,7 @@ The regressor and classifier are run in tandem so both are required. After downl
 ```
 python scripts/video_to_world_coords.py --eval_dir results/<descriptive path>/<wandb id>/<checkpoint name>/<sampling scheme descriptor> --regressor_path checkpoints/carla-regressor/regressor_checkpoint.pth --classifier_path checkpoints/carla-regressor/classifier_checkpoint.pth
 ```
+This will regress to world coordinates for each sampled video and save them to the `results/<descriptive path>/<wandb id>/<checkpoint name>/<sampling scheme descriptor>/coords/` directory
 
 We recommend using the pretrained classifier and regressor weights linked to above. To instead retrain these models run 
 ```
