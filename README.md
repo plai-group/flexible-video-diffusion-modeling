@@ -125,6 +125,30 @@ Videos produced by `scripts/video_sample.py` are saved in `.npy` format. Save a 
 ```
 python scripts/video_make_mp4.py --eval_dir results/<descriptive path>/<wandb id>/<checkpoint name>/<sampling scheme descriptor>
 ```
+
+## Interpretable metrics on CARLA Town01
+To compute the WD and PO metrics on CARLA Town01 video samples, download our regressor to world coordinates using
+```
+mkdir checkpoints/carla-regressor/
+cd checkpoints/carla-regressor/
+wget https://www.cs.ubc.ca/~wsgh/fdm/carla-regressor-ckpts/classifier_checkpoint.pth 
+wget https://www.cs.ubc.ca/~wsgh/fdm/carla-regressor-ckpts/regressor_checkpoint.pth
+cd ../../
+```
+The regressor and classifier are run in tandem so both are required. After downloading them, you can map generated samples to the corresponding sequences of CARLA world coordinates with
+```
+python scripts/video_to_world_coords.py --eval_dir results/<descriptive path>/<wandb id>/<checkpoint name>/<sampling scheme descriptor> --regressor_path checkpoints/carla-regressor/regressor_checkpoint.pth --classifier_path checkpoints/carla-regressor/classifier_checkpoint.pth
+```
+
+We recommend using the pretrained classifier and regressor weights linked to above. To instead retrain these models run 
+```
+python scripts/carla_regressor_train.py --data_dir datasets/carla/no-traffic --is_classifier True
+```
+for the classifier and
+```
+python scripts/carla_regressor_train.py --data_dir datasets/carla/no-traffic --is_classifier False
+```
+for the regressor.
   
 ## Link to original (pre-refactor) codebase
 This is a refactored version of [our original codebase](https://github.com/wsgharvey/video-diffusion) with which the experiments in [the paper](https://arxiv.org/abs/2205.11495) were run. This refactored codebase is significantly cleaner and with less changes from the Improved DDPM repo it is based on, as well as having an architectural simplification vs [our original codebase](https://github.com/wsgharvey/video-diffusion) (we removed positional encodings). We have reproduced the main results with this refactored codebase. Much of the functionality which is listed in this repository as being committed by [wsgharvey](https://github.com/wsgharvey/) was originally written by [saeidnp](https://github.com/saeidnp/) or [vmasrani](https://github.com/vmasrani).
