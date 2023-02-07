@@ -50,11 +50,11 @@ All of the previous suggestions for running on smaller GPUs will usually also sp
 ### Resuming after training ends/fails
 After training for more than `save_interval` iterations (50000 by default), we can kill and resume training from the latest checkpoint with:
 ```
-python scripts/video_train.py <ORIGINAL ARGUMENTS> --wandb_id <WANDB ID OF RUN WE ARE RESUMING>
+python scripts/video_train.py <ORIGINAL ARGUMENTS> --resume_id <WANDB ID OF RUN WE ARE RESUMING>
 ```
 e.g.
 ```
-python scripts/video_train.py --batch_size=2 --max_frames 20 --dataset=carla_no_traffic --num_res_blocks=1 --wandb_id 1v1myd4c
+python scripts/video_train.py --batch_size=2 --max_frames 20 --dataset=carla_no_traffic --num_res_blocks=1 --resume_id 1v1myd4c
 ```
 
 ## Downloading pretrained checkpoints
