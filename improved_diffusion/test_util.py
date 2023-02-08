@@ -1,7 +1,7 @@
 import os
 from filelock import FileLock
 from pathlib import Path
-import torch
+import torch as th
 import numpy as np
 from PIL import Image
 import imageio
@@ -45,7 +45,7 @@ def get_model_results_path(args):
         checkpoint_path = Path(args.checkpoint_path)
         name = f"{checkpoint_path.stem}"
         if name.endswith("latest"):
-            checkpoint_step = torch.load(args.checkpoint_path, map_location="cpu")["step"]
+            checkpoint_step = th.load(args.checkpoint_path, map_location="cpu")["step"]
             name += f"_{checkpoint_step}"
         if postfix != "":
             name += postfix

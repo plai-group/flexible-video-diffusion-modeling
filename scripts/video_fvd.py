@@ -1,14 +1,9 @@
-from collections import defaultdict
-from random import sample
-from typing import OrderedDict
-import torch
+import torch as th
 import numpy as np
 import argparse
 import os
-from tqdm.auto import tqdm
 from pathlib import Path
 import json
-import pickle
 from collections import defaultdict
 import tensorflow.compat.v1 as tf
 
@@ -20,7 +15,7 @@ from improved_diffusion import test_util
 tf.disable_eager_execution() # Required for our FVD computation code
 
 
-class SampleDataset(torch.utils.data.Dataset):
+class SampleDataset(th.utils.data.Dataset):
     def __init__(self, samples_path, sample_idx, length):
         self.samples_path = Path(samples_path)
         self.sample_idx = sample_idx
@@ -33,7 +28,7 @@ class SampleDataset(torch.utils.data.Dataset):
         path = self.samples_path / f"sample_{idx:04d}-{self.sample_idx}.npy"
         npy = np.load(path).astype(np.float32)
         normed = -1 + 2 * npy / 255
-        return torch.tensor(normed).type(torch.float32), {}
+        return th.tensor(normed).type(th.float32), {}
 
 
 class FVD:
@@ -69,8 +64,8 @@ class FVD:
 def compute_fvd(test_dataset, sample_dataset, T, num_videos, batch_size=16):
     _, C, H, W = test_dataset[0][0].shape
     fvd_handler = FVD(batch_size=batch_size, T=T, frame_shape=[H, W, C])
-    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size, shuffle=False, drop_last=False)
-    sample_loader = torch.utils.data.DataLoader(sample_dataset, batch_size=batch_size, shuffle=False, drop_last=False)
+    test_loader = th.utils.data.DataLoader(test_dataset, batch_size=batch_size, shuffle=False, drop_last=False)
+    sample_loader = th.utils.data.DataLoader(sample_dataset, batch_size=batch_size, shuffle=False, drop_last=False)
     assert len(test_dataset) == num_videos, f"{len(test_dataset)} != {num_videos}"
     assert len(sample_dataset) == num_videos, f"{len(sample_dataset)} != {num_videos}"
     with tf.Graph().as_default():
@@ -117,7 +112,7 @@ if __name__ == "__main__":
 
     # Prepare datasets
     sample_dataset = SampleDataset(samples_path=(Path(args.eval_dir) / "samples"), sample_idx=args.sample_idx, length=args.num_videos)
-    test_dataset = torch.utils.data.Subset(
+    test_dataset = th.utils.data.Subset(
         dataset=get_test_dataset(dataset_name=model_args.dataset, T=model_args.T),
         indices=list(range(args.num_videos)),
     )

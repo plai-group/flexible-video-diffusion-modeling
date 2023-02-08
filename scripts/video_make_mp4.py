@@ -1,4 +1,4 @@
-import torch
+import torch as th
 import numpy as np
 from argparse import ArgumentParser
 from pathlib import Path
@@ -63,10 +63,10 @@ if __name__ == "__main__":
 
     random_str = uuid.uuid4()
     if args.format == "gif":
-        tensor2gif(torch.tensor(video), out_path, drange=[0, 255], random_str=random_str)
+        tensor2gif(th.tensor(video), out_path, drange=[0, 255], random_str=random_str)
     elif args.format == "mp4":
-        print(torch.tensor(video).shape, torch.tensor(video).dtype)
-        tensor2mp4(torch.tensor(video), out_path, drange=[0, 255], random_str=random_str)
+        print(th.tensor(video).shape, th.tensor(video).dtype)
+        tensor2mp4(th.tensor(video), out_path, drange=[0, 255], random_str=random_str)
     else:
         raise ValueError(f"Unknown format {args.format}")
     print(f"Saved to {out_path}")

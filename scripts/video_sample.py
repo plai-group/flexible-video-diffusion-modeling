@@ -11,7 +11,7 @@ from pathlib import Path
 from PIL import Image
 
 import numpy as np
-import torch
+import torch as th
 
 from improved_diffusion import dist_util
 from improved_diffusion.script_util import (
@@ -25,7 +25,7 @@ from improved_diffusion.sampling_schemes import sampling_schemes
 from improved_diffusion.video_datasets import get_test_dataset
 
 
-@torch.no_grad()
+@th.no_grad()
 def sample_video(args, model, diffusion, batch, just_get_indices=False):
     """
     batch has a shape of BxTxCxHxW where
@@ -34,7 +34,7 @@ def sample_video(args, model, diffusion, batch, just_get_indices=False):
     CxWxH: image size
     """
     B, T, C, H, W = batch.shape
-    samples = torch.zeros_like(batch)
+    samples = th.zeros_like(batch)
     samples[:, :args.n_obs] = batch[:, :args.n_obs]
     # Intilise sampling scheme
     optimal_schedule_path = None if args.optimality is None else args.eval_dir / "optimal_schedule.pt"
@@ -53,13 +53,13 @@ def sample_video(args, model, diffusion, batch, just_get_indices=False):
             break
         print(f"Conditioning on {sorted(obs_frame_indices)} frames, predicting {sorted(latent_frame_indices)}.")
         # Prepare network's input
-        frame_indices = torch.cat([torch.tensor(obs_frame_indices), torch.tensor(latent_frame_indices)], dim=1).long()
-        x0 = torch.stack([samples[i, fi] for i, fi in enumerate(frame_indices)], dim=0).clone()
-        obs_mask = torch.cat([torch.ones_like(torch.tensor(obs_frame_indices)),
-                              torch.zeros_like(torch.tensor(latent_frame_indices))], dim=1).view(B, -1, 1, 1, 1).float()
+        frame_indices = th.cat([th.tensor(obs_frame_indices), th.tensor(latent_frame_indices)], dim=1).long()
+        x0 = th.stack([samples[i, fi] for i, fi in enumerate(frame_indices)], dim=0).clone()
+        obs_mask = th.cat([th.ones_like(th.tensor(obs_frame_indices)),
+                              th.zeros_like(th.tensor(latent_frame_indices))], dim=1).view(B, -1, 1, 1, 1).float()
         latent_mask = 1 - obs_mask
         if just_get_indices:
-            local_samples = torch.stack([batch[i, ind] for i, ind in enumerate(frame_indices)])
+            local_samples = th.stack([batch[i, ind] for i, ind in enumerate(frame_indices)])
         else:
             # Prepare masks
             print(f"{'Frame indices':20}: {frame_indices[0].cpu().numpy()}.")
@@ -95,7 +95,7 @@ def main(args, model, diffusion, dataset):
         if not any(todo):
             print(f"Nothing to do for the batches {min(batch_indices)} - {max(batch_indices)}, sample #{args.sample_idx}.")
             continue
-        batch = torch.stack([dataset[i][0] for i in batch_indices])
+        batch = th.stack([dataset[i][0] for i in batch_indices])
         samples, _ = sample_video(args, model, diffusion, batch)
         drange = [-1, 1]
         samples = (samples.numpy() - drange[0]) / (drange[1] - drange[0]) * 255
@@ -115,7 +115,7 @@ def visualise(args, model, diffusion, dataset):
     """
     is_adaptive = "adaptive" in args.sampling_scheme
     bs = args.batch_size if is_adaptive else 1
-    batch = next(iter(torch.utils.data.DataLoader(dataset, batch_size=bs, shuffle=False, drop_last=False)))[0]
+    batch = next(iter(th.utils.data.DataLoader(dataset, batch_size=bs, shuffle=False, drop_last=False)))[0]
     _, indices = sample_video(args, model, diffusion, batch, just_get_indices=True)
 
     def visualise_obs_lat_sequence(sequence, index):
@@ -127,13 +127,13 @@ def visualise(args, model, diffusion, dataset):
         for obs_frame_indices, latent_frame_indices in sequence:
             obs_frame_indices, latent_frame_indices = obs_frame_indices[index], latent_frame_indices[index]
             exist_indices.extend(latent_frame_indices)
-            new_layer = torch.zeros((args.T, 3)).int()
-            border_colour = torch.tensor([0, 0, 0]).int()
-            not_sampled_colour = torch.tensor([255, 255, 255]).int()
-            exist_colour = torch.tensor([50, 50, 50]).int()
-            obs_colour = torch.tensor([50, 50, 255]).int()
-            latent_colour = torch.tensor([255, 69, 0]).int()
-            new_layer = torch.zeros((args.T, 3)).int()
+            new_layer = th.zeros((args.T, 3)).int()
+            border_colour = th.tensor([0, 0, 0]).int()
+            not_sampled_colour = th.tensor([255, 255, 255]).int()
+            exist_colour = th.tensor([50, 50, 50]).int()
+            obs_colour = th.tensor([50, 50, 255]).int()
+            latent_colour = th.tensor([255, 69, 0]).int()
+            new_layer = th.zeros((args.T, 3)).int()
             new_layer[:, :] = not_sampled_colour
             new_layer[exist_indices, :] = exist_colour
             new_layer[obs_frame_indices, :] = obs_colour
@@ -141,10 +141,10 @@ def visualise(args, model, diffusion, dataset):
             scale = 4
             new_layer = new_layer.repeat_interleave(scale+1, dim=0)
             new_layer[::(scale+1)] = border_colour
-            new_layer = torch.cat([new_layer, new_layer[:1]], dim=0)
+            new_layer = th.cat([new_layer, new_layer[:1]], dim=0)
             vis.extend([new_layer.clone() for _ in range(scale+1)])
             vis[-1][:] = border_colour
-        vis = torch.stack([vis[-1], *vis])
+        vis = th.stack([vis[-1], *vis])
         if not is_adaptive:
             assert index == 0
         fname = f"vis_{args.sampling_scheme}_sampling-{args.T}-given-{args.n_obs}_{args.max_latent_frames}-{args.max_frames}-chunks"
@@ -185,7 +185,7 @@ if __name__ == "__main__":
     parser.add_argument("--optimality", type=str, default=None,
                         choices=["linspace-t", "random-t", "linspace-t-force-nearby", "random-t-force-nearby"],
                         help="Type of optimised sampling scheme to use for choosing observed frames. By default uses non-optimized sampling scheme. The optimal indices should be computed before use via video_optimal_schedule.py.")
-    parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument("--device", default="cuda" if th.cuda.is_available() else "cpu")
     args = parser.parse_args()
 
     # Prepare which indices to sample (for unconditional generation index does nothing except change file name)

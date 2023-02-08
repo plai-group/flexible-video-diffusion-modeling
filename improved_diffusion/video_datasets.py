@@ -1,6 +1,6 @@
 import os
 import numpy as np
-import torch
+import torch as th
 from torch.utils.data import DataLoader, Dataset
 from torchvision.transforms import ToTensor
 from pathlib import Path
@@ -179,7 +179,7 @@ class CarlaDataset(BaseDataset):
         print(f"Loading {len(self.fnames)} files (Carla dataset).")
 
     def loaditem(self, path):
-        return torch.load(path)
+        return th.load(path)
 
     def getitem_path(self, idx):
         return self.path / self.fnames[idx]
@@ -207,7 +207,7 @@ class GQNMazesDataset(BaseDataset):
 
     def postprocess_video(self, video):
         byte_to_tensor = lambda x: ToTensor()(x)
-        video = torch.stack([byte_to_tensor(frame) for frame in video])
+        video = th.stack([byte_to_tensor(frame) for frame in video])
         video = 2 * video - 1
         return video
 
@@ -226,6 +226,6 @@ class MineRLDataset(BaseDataset):
 
     def postprocess_video(self, video):
         byte_to_tensor = lambda x: ToTensor()(x)
-        video = torch.stack([byte_to_tensor(frame) for frame in video])
+        video = th.stack([byte_to_tensor(frame) for frame in video])
         video = 2 * video - 1
         return video
