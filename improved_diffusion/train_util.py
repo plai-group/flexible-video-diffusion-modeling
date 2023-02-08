@@ -133,15 +133,12 @@ class TrainLoop:
 
         if resume_checkpoint:
             self.step = parse_resume_step_from_filename(resume_checkpoint)
-            if dist.get_rank() == 0:
-                print(f"loading model from checkpoint: {resume_checkpoint}...")
-                self.model.load_state_dict(
-                    dist_util.load_state_dict(
-                        resume_checkpoint, map_location=dist_util.dev()
-                    )['state_dict']
-                )
-
-        dist_util.sync_params(self.model.parameters())
+            print(f"loading model from checkpoint: {resume_checkpoint}...")
+            self.model.load_state_dict(
+                dist_util.load_state_dict(
+                    resume_checkpoint, map_location=dist_util.dev()
+                )['state_dict']
+            )
 
     def _load_ema_parameters(self, rate):
         ema_params = copy.deepcopy(self.master_params)
@@ -149,14 +146,12 @@ class TrainLoop:
         main_checkpoint = find_resume_checkpoint(self.args) or self.resume_checkpoint
         ema_checkpoint = find_ema_checkpoint(main_checkpoint, self.step, rate)
         if ema_checkpoint:
-            if dist.get_rank() == 0:
-                print(f"loading EMA from checkpoint: {ema_checkpoint}...")
-                state_dict = dist_util.load_state_dict(
-                    ema_checkpoint, map_location=dist_util.dev()
-                )['state_dict']
-                ema_params = self._state_dict_to_master_params(state_dict)
+            print(f"loading EMA from checkpoint: {ema_checkpoint}...")
+            state_dict = dist_util.load_state_dict(
+                ema_checkpoint, map_location=dist_util.dev()
+            )['state_dict']
+            ema_params = self._state_dict_to_master_params(state_dict)
 
-        dist_util.sync_params(ema_params)
         return ema_params
 
     def _load_optimizer_state(self):
